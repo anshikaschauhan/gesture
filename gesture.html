@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gemini Gesture Particles</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #00ffcc; pointer-events: none; text-shadow: 0 0 5px #000; }
+        #webcam { transform: scaleX(-1); position: absolute; bottom: 20px; right: 20px; width: 200px; border-radius: 10px; border: 2px solid #00ffcc; }
+        .controls { font-size: 0.8rem; color: #fff; opacity: 0.7; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h2>Interactive Particle Engine</h2>
+    <div class="controls">
+        [1] Sphere | [2] Heart | [3] Saturn | [4] Flower<br>
+        <b>Gesticulate:</b> Pinch to scale | Move hand to rotate
+    </div>
+</div>
+<video id="webcam" autoplay playsinline></video>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+<script>
+/** 1. THREE.JS INITIALIZATION **/
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+camera.position.z = 20;
+
+const particleCount = 8000;
+const geometry = new THREE.BufferGeometry();
+const positions = new Float32Array(particleCount * 3);
+const colors = new Float32Array(particleCount * 3);
+
+// Initial random cloud
+for(let i=0; i < particleCount * 3; i++) {
+    positions[i] = (Math.random() - 0.5) * 30;
+    colors[i] = Math.random();
+}
+
+geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+const material = new THREE.PointsMaterial({
+    size: 0.07,
+    vertexColors: true,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    opacity: 0.8
+});
+
+const points = new THREE.Points(geometry, material);
+scene.add(points);
+
+/** 2. SHAPE GENERATORS (The Math) **/
+const getSphere = () => {
+    const pts = [];
+    for (let i = 0; i < particleCount; i++) {
+        const phi = Math.acos(-1 + (2 * i) / particleCount);
+        const theta = Math.sqrt(particleCount * Math.PI) * phi;
+        pts.push(8 * Math.cos(theta) * Math.sin(phi), 8 * Math.sin(theta) * Math.sin(phi), 8 * Math.cos(phi));
+    }
+    return pts;
+};
+
+const getHeart = () => {
+    const pts = [];
+    for (let i = 0; i < particleCount; i++) {
+        const t = Math.random() * Math.PI * 2;
+        const x = 16 * Math.pow(Math.sin(t), 3);
+        const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+        const z = (Math.random() - 0.5) * 5;
+        pts.push(x * 0.5, y * 0.5, z);
+    }
+    return pts;
+};
+
+const getSaturn = () => {
+    const pts = [];
+    for (let i = 0; i < particleCount; i++) {
+        if (i < particleCount * 0.4) { // The Planet
+            const phi = Math.random() * Math.PI * 2;
+            const theta = Math.random() * Math.PI;
+            pts.push(5 * Math.cos(phi) * Math.sin(theta), 5 * Math.sin(phi) * Math.sin(theta), 5 * Math.cos(theta));
+        } else { // The Rings
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 7 + Math.random() * 4;
+            pts.push(radius * Math.cos(angle), (Math.random() - 0.5) * 0.5, radius * Math.sin(angle));
+        }
+    }
+    return pts;
+};
+
+const getFlower = () => {
+    const pts = [];
+    for (let i = 0; i < particleCount; i++) {
+        const u = Math.random() * Math.PI * 2;
+        const v = Math.random() * Math.PI * 2;
+        const x = (10 + 3 * Math.cos(v)) * Math.cos(u);
+        const y = (10 + 3 * Math.cos(v)) * Math.sin(u);
+        const z = 3 * Math.sin(v);
+        pts.push(x * 0.7, y * 0.7, z * 0.7);
+    }
+    return pts;
+};
+
+/** 3. ANIMATION & MORPHING **/
+function morphTo(targetPositions, colorHex) {
+    const posAttr = geometry.attributes.position;
+    const colAttr = geometry.attributes.color;
+    const newColor = new THREE.Color(colorHex);
+
+    for (let i = 0; i < particleCount; i++) {
+        gsap.to(posAttr.array, {
+            duration: 2,
+            [i * 3]: targetPositions[i * 3],
+            [i * 3 + 1]: targetPositions[i * 3 + 1],
+            [i * 3 + 2]: targetPositions[i * 3 + 2],
+            ease: "expo.inOut",
+            onUpdate: () => posAttr.needsUpdate = true
+        });
+        
+        // Dynamic color shift
+        gsap.to(colAttr.array, {
+            duration: 1.5,
+            [i * 3]: newColor.r + (Math.random() * 0.2),
+            [i * 3 + 1]: newColor.g,
+            [i * 3 + 2]: newColor.b + (Math.random() * 0.5),
+            onUpdate: () => colAttr.needsUpdate = true
+        });
+    }
+}
+
+/** 4. HAND TRACKING LOGIC **/
+const video = document.getElementById('webcam');
+const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+
+hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
+hands.onResults((results) => {
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const hand = results.multiHandLandmarks[0];
+        
+        // Gesture: Distance between Index Tip (8) and Thumb Tip (4)
+        const dx = hand[8].x - hand[4].x;
+        const dy = hand[8].y - hand[4].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        // Map gesture to scale and rotation
+        const targetScale = gsap.utils.mapRange(0.05, 0.35, 0.2, 2.5, dist);
+        gsap.to(points.scale, { x: targetScale, y: targetScale, z: targetScale, duration: 0.2 });
+        
+        points.rotation.y = hand[0].x * Math.PI * 2;
+        points.rotation.x = hand[0].y * Math.PI;
+    }
+});
+
+const cam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640, height: 480
+});
+cam.start();
+
+/** 5. INPUT LISTENERS **/
+window.addEventListener('keydown', (e) => {
+    if (e.key === '1') morphTo(getSphere(), 0x00ffff);
+    if (e.key === '2') morphTo(getHeart(), 0xff0055);
+    if (e.key === '3') morphTo(getSaturn(), 0xffaa00);
+    if (e.key === '4') morphTo(getFlower(), 0xaa00ff);
+});
+
+function animate() {
+    requestAnimationFrame(animate);
+    points.rotation.z += 0.002; // Constant slow drift
+    renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
